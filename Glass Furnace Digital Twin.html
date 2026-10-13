@@ -1,0 +1,1010 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Glass Furnace Digital Twin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout concept: an instrument panel. A control rail on the left holds every input; the readout canvas on the right
+   switches between KPIs, charts and the ML optimizer. Dark furnace palette carried over from the original notebook,
+   with a light variant. Chart hues come from the validated categorical set (blue, orange, teal, violet). */
+:root {
+  color-scheme: dark;
+  --bg: #0d1117; --surface: #161b22; --surface-2: #1d232c;
+  --line: #30363d; --line-soft: #232a33; --grid: #262d36;
+  --fg: #e6edf3; --fg-2: #a3adb8; --fg-3: #8b949e;
+  --accent: #ff7b00; --accent-ink: #0d1117;
+  --s-blue: #3987e5; --s-orange: #d95926; --s-teal: #199e70; --s-violet: #9085e9;
+  --good: #3fb950; --warn: #d29922; --bad: #f85149;
+  --sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'IBM Plex Mono', 'Courier New', monospace;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #f4f5f7; --surface: #ffffff; --surface-2: #eef0f3;
+    --line: #d5d9e0; --line-soft: #e6e9ee; --grid: #e6e9ee;
+    --fg: #1b2128; --fg-2: #4d5866; --fg-3: #667180;
+    --accent: #c2410c; --accent-ink: #ffffff;
+    --s-blue: #0969da; --s-orange: #c2570a; --s-teal: #00826a; --s-violet: #8250df;
+    --good: #1a7f37; --warn: #9a6700; --bad: #cf222e;
+  }
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f4f5f7; --surface: #ffffff; --surface-2: #eef0f3;
+  --line: #d5d9e0; --line-soft: #e6e9ee; --grid: #e6e9ee;
+  --fg: #1b2128; --fg-2: #4d5866; --fg-3: #667180;
+  --accent: #c2410c; --accent-ink: #ffffff;
+  --s-blue: #0969da; --s-orange: #c2570a; --s-teal: #00826a; --s-violet: #8250df;
+  --good: #1a7f37; --warn: #9a6700; --bad: #cf222e;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 var(--sans); }
+sub { font-size: .75em; line-height: 0; }
+.wrap { max-width: 1480px; margin: 0 auto; padding-inline: 16px; padding-block: 24px 56px; }
+
+/* header */
+.eyebrow { font: 500 11px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin: 0 0 10px; }
+h1 { font: 600 clamp(24px, 3.4vw, 32px)/1.15 var(--sans); margin: 0 0 10px; text-wrap: balance; }
+.lede { max-width: 72ch; margin: 0 0 14px; color: var(--fg-2); }
+.facts { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0 0 22px; padding: 0; list-style: none; font: 12px/1.4 var(--mono); color: var(--fg-3); }
+.facts li::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 8px; background: var(--accent); border-radius: 1px; vertical-align: 1px; }
+
+/* app grid */
+.app { display: grid; grid-template-columns: minmax(300px, 372px) minmax(0, 1fr); gap: 20px; align-items: start; }
+.rail { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px 16px; }
+@media (min-width: 961px) { .rail { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; } }
+@media (max-width: 960px) { .app { grid-template-columns: minmax(0, 1fr); } }
+
+.presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.presets button, .btn {
+  font: 500 12px/1 var(--mono); color: var(--fg); background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: 6px; padding: 8px 10px; cursor: pointer;
+}
+.presets button:hover, .btn:hover { border-color: var(--fg-3); }
+.presets button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.btn:disabled { opacity: .55; cursor: progress; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rail-label { font: 500 11px/1.3 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--fg-3); margin: 0 0 8px; }
+
+details.group { border-top: 1px solid var(--line-soft); padding-block: 10px 4px; margin-top: 10px; }
+details.group > summary { list-style: none; cursor: pointer; font: 500 11px/1.3 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--fg-2); display: flex; justify-content: space-between; align-items: center; padding-bottom: 8px; }
+details.group > summary::-webkit-details-marker { display: none; }
+details.group > summary::after { content: '+'; font-size: 14px; color: var(--fg-3); }
+details.group[open] > summary::after { content: '\2212'; }
+.ctl { margin-bottom: 11px; }
+.ctl label { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 13px; color: var(--fg-2); margin-bottom: 2px; }
+.ctl output { font: 500 12px/1 var(--mono); color: var(--fg); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ctl input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); height: 22px; }
+.ctl select { width: 100%; font: 13px var(--sans); color: var(--fg); background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+
+/* tabs */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 16px; overflow-x: auto; }
+.tabs button { font: 500 13px/1 var(--sans); color: var(--fg-2); background: none; border: 0; border-bottom: 2px solid transparent; padding: 10px 14px; cursor: pointer; white-space: nowrap; }
+.tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
+.tabs button:hover { color: var(--fg); }
+.status { font: 12px/1.4 var(--mono); color: var(--fg-3); margin: 0 0 14px; min-height: 17px; }
+.comp-line { font: 12px/1.5 var(--mono); color: var(--fg-3); margin: 0 0 14px; overflow-wrap: anywhere; }
+
+/* KPIs */
+.headline { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; margin-bottom: 22px; }
+.headline > div { padding: 14px 16px; border-left: 1px solid var(--line-soft); min-width: 0; }
+.headline > div:first-child { border-left: 0; }
+.k-label { font: 500 11px/1.3 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--fg-3); }
+.k-val { font: 500 clamp(22px, 2.4vw, 28px)/1.2 var(--mono); font-variant-numeric: tabular-nums; margin: 4px 0 2px; overflow-wrap: anywhere; }
+.k-unit { font: 12px/1.3 var(--mono); color: var(--fg-3); }
+.state { display: inline-flex; align-items: center; gap: 6px; font: 500 12px/1.3 var(--mono); margin-top: 4px; }
+.state i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; display: inline-block; }
+.state.good { color: var(--good); } .state.warn { color: var(--warn); } .state.bad { color: var(--bad); }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 26px 28px; }
+.sect h3 { font: 500 11px/1.3 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--fg-2); margin: 0 0 8px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+dl.rows { margin: 0; }
+dl.rows > div { display: flex; justify-content: space-between; gap: 14px; padding: 7px 0; border-bottom: 1px solid var(--line-soft); }
+dl.rows dt { color: var(--fg-2); }
+dl.rows dd { margin: 0; font: 500 13px/1.5 var(--mono); font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
+dl.rows dd small { color: var(--fg-3); font-weight: 400; margin-left: 4px; }
+.tag { font: 500 10px/1 var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--fg-3); border: 1px solid var(--line); border-radius: 3px; padding: 2px 4px; margin-left: 6px; vertical-align: 1px; }
+.bars > div { padding: 7px 0 8px; border-bottom: 1px solid var(--line-soft); }
+.bars .bt { display: flex; justify-content: space-between; gap: 14px; }
+.bars .bt span:first-child { color: var(--fg-2); }
+.bars .bt span:last-child { font: 500 13px/1.5 var(--mono); font-variant-numeric: tabular-nums; }
+.bars .track { height: 6px; background: var(--line-soft); border-radius: 3px; margin-top: 5px; }
+.bars .track i { display: block; height: 100%; border-radius: 3px; }
+.total { display: flex; justify-content: space-between; gap: 14px; padding-top: 9px; font-weight: 500; }
+.total span:last-child { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* charts */
+.charts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
+@media (min-width: 1300px) { .charts { grid-template-columns: repeat(2, minmax(0, 1fr)); } .charts .wide { grid-column: 1 / -1; } }
+.chart { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 14px 10px; min-width: 0; }
+.chart h3 { font: 600 14px/1.3 var(--sans); margin: 0 0 2px; }
+.chart p { margin: 0 0 6px; font-size: 12px; color: var(--fg-3); }
+.plot { width: 100%; min-width: 0; }
+.chart details { margin-top: 6px; }
+.chart summary { cursor: pointer; font: 500 11px/1.3 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--fg-3); padding: 4px 0; }
+.tbl { max-height: 220px; overflow: auto; border: 1px solid var(--line-soft); border-radius: 6px; margin-top: 6px; }
+.tbl table { border-collapse: collapse; width: 100%; font: 12px/1.4 var(--mono); font-variant-numeric: tabular-nums; }
+.tbl th, .tbl td { padding: 5px 10px; text-align: right; border-bottom: 1px solid var(--line-soft); white-space: nowrap; }
+.tbl th { position: sticky; top: 0; background: var(--surface-2); color: var(--fg-2); font-weight: 500; }
+.notice { color: var(--fg-2); background: var(--surface); border: 1px dashed var(--line); border-radius: 8px; padding: 14px 16px; }
+
+/* optimizer */
+.ml-intro { max-width: 78ch; color: var(--fg-2); margin: 0 0 14px; }
+.ml-bar { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 18px; }
+.fit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: 14px; margin-bottom: 20px; }
+.result { margin-top: 6px; }
+.result table { width: 100%; border-collapse: collapse; font: 13px/1.4 var(--mono); font-variant-numeric: tabular-nums; }
+.result th { font: 500 11px/1.3 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--fg-3); text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+.result td { text-align: right; padding: 7px 10px; border-bottom: 1px solid var(--line-soft); }
+.result th:first-child, .result td:first-child { text-align: left; font-family: var(--sans); color: var(--fg-2); padding-left: 0; }
+.result .scroll { overflow-x: auto; }
+.result .delta-up { color: var(--fg); } .result .delta-0 { color: var(--fg-3); }
+.callout { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin: 0 0 16px; }
+.callout b { font-weight: 600; }
+.fine { font-size: 12px; color: var(--fg-3); max-width: 80ch; }
+.basis { margin-top: 28px; border-top: 1px solid var(--line); padding-top: 14px; }
+.basis summary { cursor: pointer; font: 500 11px/1.3 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--fg-2); }
+.basis ul { margin: 12px 0 0; padding-left: 18px; color: var(--fg-2); max-width: 86ch; }
+.basis li { margin-bottom: 6px; }
+.basis code { font: 12px var(--mono); color: var(--fg); }
+@media (prefers-reduced-motion: no-preference) { .k-val { transition: color .2s; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">Scientific digital twin</p>
+    <h1>Glass Furnace Digital Twin</h1>
+    <p class="lede">An interactive simulator of an industrial soda-lime glass melting furnace. Move any slider and the energy balance, exergy, CO<sub>2</sub>, melt viscosity and glass properties recalculate instantly. A machine-learning surrogate then searches the operating window for better settings.</p>
+    <ul class="facts">
+      <li>First law energy balance</li>
+      <li>Second law exergy analysis</li>
+      <li>VFT melt viscosity</li>
+      <li>Gradient boosting surrogate</li>
+      <li>Illustrative parameters, no plant data</li>
+    </ul>
+  </header>
+
+  <div class="app">
+    <aside class="rail" aria-label="Simulation inputs">
+      <p class="rail-label">Scenarios</p>
+      <div class="presets" id="presets"></div>
+      <div id="controls"></div>
+    </aside>
+
+    <main>
+      <div class="tabs" role="tablist" aria-label="Views">
+        <button role="tab" id="tab-kpis" aria-selected="true" aria-controls="panel-kpis" data-tab="kpis">KPIs</button>
+        <button role="tab" id="tab-charts" aria-selected="false" aria-controls="panel-charts" data-tab="charts" tabindex="-1">Charts</button>
+        <button role="tab" id="tab-optimizer" aria-selected="false" aria-controls="panel-optimizer" data-tab="optimizer" tabindex="-1">ML optimizer</button>
+      </div>
+      <p class="status" id="status" aria-live="polite"></p>
+
+      <section id="panel-kpis" role="tabpanel" aria-labelledby="tab-kpis"></section>
+      <section id="panel-charts" role="tabpanel" aria-labelledby="tab-charts" hidden></section>
+      <section id="panel-optimizer" role="tabpanel" aria-labelledby="tab-optimizer" hidden></section>
+
+      <details class="basis">
+        <summary>How the model works</summary>
+        <ul>
+          <li><b>Melt viscosity.</b> Vogel-Fulcher-Tammann law, <code>log&#8321;&#8320; &eta; = A + B / (T &minus; T&#8320;)</code>, with A, B and T&#8320; shifted by the weight percent of each oxide.</li>
+          <li><b>Glass transition and liquidus.</b> Tg is a 510 &deg;C baseline plus additive oxide contributions. Liquidus is an empirical soda-lime-silica fit.</li>
+          <li><b>Energy balance.</b> Sensible heat, latent heat, endothermic batch reactions, wall radiation and flue gas loss, minus the share supplied by electric boosting.</li>
+          <li><b>Exergy.</b> Chemical exergy of the fuel, physical exergy of the hot glass, and Carnot-weighted radiation and flue losses.</li>
+          <li><b>CO<sub>2</sub>.</b> Fuel combustion, carbonate decomposition in the batch, grid electricity at 0.25 kg/kWh, less the saving from recycled cullet.</li>
+          <li><b>ML surrogate.</b> Three gradient boosting regressors (150 trees, depth 4) learn CO<sub>2</sub>, energy demand and durability from 400 random simulations, then a bounded search runs on the surrogate instead of the slower physics model.</li>
+        </ul>
+      </details>
+    </main>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+<script>
+(function () {
+'use strict';
+
+/* =====================================================================================
+   PART 1. PHYSICS MODEL (direct port of the Python classes, same equations and constants)
+   ===================================================================================== */
+const clip = (x, a, b) => Math.min(Math.max(x, a), b);
+const SB = 5.670374419e-8, R_GAS = 8.314462618, T_REF = 298.15, T_AMB = 293.15;
+
+const MOLAR_MASS = { SiO2: 60.09, Na2O: 61.98, CaO: 56.08, MgO: 40.30, Al2O3: 101.96, Fe2O3: 159.69, Cr2O3: 152.00,
+  SO3: 80.06, MnO2: 86.94, K2O: 94.20, TiO2: 79.87, B2O3: 69.62, PbO: 223.20, ZrO2: 123.22, BaO: 153.33 };
+const VFT_BASE = { A: -2.6, B: 4900.0, T0: 540.0 };
+const VFT_MOD = { SiO2: [0.010, 12.0, 0.5], Na2O: [-0.045, -35.0, -1.8], CaO: [-0.020, -18.0, -0.9], MgO: [-0.015, -10.0, -0.5],
+  Al2O3: [0.035, 22.0, 1.2], Fe2O3: [-0.008, -5.0, -0.3], K2O: [-0.040, -30.0, -1.5], B2O3: [-0.030, -25.0, -1.2],
+  PbO: [-0.050, -40.0, -2.0], ZrO2: [0.040, 28.0, 1.5], TiO2: [0.015, 10.0, 0.5], BaO: [-0.018, -12.0, -0.6] };
+const TG_BASE = 510.0;
+const TG_COEFF = { SiO2: 3.0, Na2O: -2.5, CaO: -0.5, MgO: 0.8, Al2O3: 4.5, Fe2O3: -1.0, K2O: -3.5, B2O3: -1.8, PbO: -2.2,
+  ZrO2: 5.0, TiO2: 2.0, Cr2O3: 1.5, MnO2: -0.5, SO3: -1.0 };
+const DENSITY_CONTRIB = { SiO2: 2.20, Na2O: 2.27, CaO: 3.35, MgO: 3.58, Al2O3: 3.99, Fe2O3: 5.24, K2O: 2.32, B2O3: 1.84,
+  PbO: 9.53, ZrO2: 5.68, TiO2: 4.23, BaO: 6.01 };
+const CULLET_CO2_FACTOR = { 'Container (soda-lime)': 0.85, 'Flat glass': 0.83, 'LCD (borosilicate)': 0.80, 'CRT (lead silicate)': 0.78 };
+const OXIDES = ['SiO2', 'Na2O', 'CaO', 'MgO', 'Al2O3', 'Fe2O3', 'Cr2O3', 'SO3', 'MnO2', 'K2O', 'TiO2', 'B2O3', 'PbO', 'ZrO2'];
+
+const LHV = { CH4: 50.05, H2: 119.96, C3H8: 46.35 };
+const MW_FUEL = { CH4: 0.01604, H2: 0.00202, C3H8: 0.04410 };
+const CP_PROD = { CO2: 54.3, H2O: 38.5, N2: 31.2, O2: 33.8 };
+const STOICH = { CH4: { CO2: 1.0, H2O: 2.0, O2c: 2.0 }, H2: { CO2: 0.0, H2O: 1.0, O2c: 0.5 }, C3H8: { CO2: 3.0, H2O: 4.0, O2c: 5.0 } };
+const EXERGY_FACTOR = { CH4: 1.040, H2: 1.034, C3H8: 1.045 };
+const CARBONATE_ROUTES = { Na2O: [105.99, 44.01, 322.0], CaO: [100.09, 44.01, 178.0], MgO: [84.31, 44.01, 101.0] };
+const CP_GLASS_MELT = 1250.0;
+
+class Combustion {
+  constructor(fuel, o2, excess) {
+    this.fuel = fuel; this.o2 = clip(o2, 0.21, 1.0); this.excess = excess; this.n2f = Math.max(0.0, 1.0 - this.o2);
+  }
+  adiabaticFlameT(Tin = 298.15) {
+    const s = STOICH[this.fuel];
+    const lhvMol = LHV[this.fuel] * 1e6 * MW_FUEL[this.fuel];
+    const o2Req = s.O2c * (1 + this.excess);
+    const n2 = o2Req * (this.n2f / Math.max(this.o2, 1e-9));
+    const exO2 = s.O2c * this.excess;
+    const cp = s.CO2 * CP_PROD.CO2 + s.H2O * CP_PROD.H2O + n2 * CP_PROD.N2 + exO2 * CP_PROD.O2;
+    const qPre = (o2Req + n2) * 30.0 * (Tin - T_REF);
+    return Math.min(T_REF + (lhvMol + qPre) / Math.max(cp, 1.0), 3500.0);
+  }
+  flueGas() {
+    const s = STOICH[this.fuel];
+    const o2Req = s.O2c * (1 + this.excess);
+    const n2 = o2Req * (this.n2f / Math.max(this.o2, 1e-9));
+    const ex = s.O2c * this.excess;
+    const tot = s.CO2 + s.H2O + n2 + ex;
+    return { CO2: s.CO2 / tot, H2O: s.H2O / tot, N2: n2 / tot, O2: ex / tot };
+  }
+  noxIndex(Tflame) {
+    const fg = this.flueGas();
+    const idx = Math.exp(-314000.0 / (R_GAS * Tflame)) * Math.sqrt(fg.N2 * (fg.O2 + 0.01));
+    return Math.min(idx * 1e14, 100.0);
+  }
+  co2PerTon(fuelMJ) {
+    const kgFuel = fuelMJ / LHV[this.fuel];
+    const molPerKg = 1000.0 / (MW_FUEL[this.fuel] * 1000.0);
+    return STOICH[this.fuel].CO2 * molPerKg * kgFuel * 0.04401 * 1000.0;
+  }
+  flueHeatLoss(Tflue, fuelMJ) {
+    const fg = this.flueGas();
+    const cpAvg = fg.CO2 * 54.3 + fg.H2O * 38.5 + fg.N2 * 31.2 + fg.O2 * 33.8;
+    const s = STOICH[this.fuel];
+    const kgFuel = fuelMJ / LHV[this.fuel];
+    const molFuel = kgFuel * 1000.0 / (MW_FUEL[this.fuel] * 1000.0);
+    const o2Req = s.O2c * (1 + this.excess);
+    const n2 = o2Req * (this.n2f / Math.max(this.o2, 1e-9));
+    const nProd = s.CO2 + s.H2O + n2 + s.O2c * this.excess;
+    return molFuel * nProd * cpAvg * (Tflue - T_AMB) / 1e6;
+  }
+}
+
+class Batch {
+  constructor(comp, cullet, culletType) {
+    this.comp = comp; this.fCullet = clip(cullet, 0.0, 0.95); this.fVirgin = 1.0 - this.fCullet;
+    this.co2Factor = CULLET_CO2_FACTOR[culletType];
+  }
+  decomposition() {
+    let kJ = 0.0, co2 = 0.0;
+    for (const ox of Object.keys(CARBONATE_ROUTES)) {
+      const [, mwCO2, dH] = CARBONATE_ROUTES[ox];
+      const wt = (this.comp[ox] ?? 0.0) * this.fVirgin / 100.0;
+      const mol = (wt * 1e6) / MOLAR_MASS[ox];
+      kJ += mol * dH; co2 += mol * mwCO2 / 1000.0;
+    }
+    return [kJ / 1000.0, co2];
+  }
+}
+
+class Glass {
+  constructor(comp) { this.comp = comp; }
+  g(ox, d = 0.0) { return this.comp[ox] ?? d; }
+  vft() {
+    let A = VFT_BASE.A, B = VFT_BASE.B, T0 = VFT_BASE.T0;
+    for (const ox of Object.keys(VFT_MOD)) {
+      const [dA, dB, dT] = VFT_MOD[ox]; const wt = this.g(ox, 0.0);
+      A += dA * wt; B += dB * wt; T0 += dT * wt;
+    }
+    return [A, B, Math.max(T0, 200.0)];
+  }
+  logViscosity(Tc) {
+    const [A, B, T0] = this.vft(); const dT = (Tc + 273.15) - T0;
+    return dT <= 0 ? 15.0 : A + B / dT;
+  }
+  viscosity(Tc) { return Math.pow(10.0, clip(this.logViscosity(Tc), -2, 15)); }
+  Tg() { let tg = TG_BASE; for (const ox of Object.keys(TG_COEFF)) tg += TG_COEFF[ox] * this.g(ox, 0.0); return clip(tg, 300.0, 900.0); }
+  Tliquidus() {
+    const SiO2 = this.g('SiO2', 72.0), Na2O = this.g('Na2O', 14.0), CaO = this.g('CaO', 10.0), Al2O3 = this.g('Al2O3', 1.0), K2O = this.g('K2O', 0.0);
+    const mod = Na2O + CaO + K2O;
+    let t = 1080.0 + 3.5 * (SiO2 - 72.0) - 1.2 * (mod - 24.0) + 4.0 * Al2O3;
+    t += this.g('ZrO2', 0.0) * 8.0; t += this.g('TiO2', 0.0) * 3.0;
+    return clip(t, 900.0, 1350.0);
+  }
+  Tmelt() { const [A, B, T0] = this.vft(); const den = 1.0 - A; return den <= 0 ? 1500.0 : (T0 + B / den) - 273.15; }
+  durability() {
+    const v = this.g('SiO2') * 0.08 + this.g('Al2O3') * 0.15 + this.g('CaO') * 0.06 + this.g('MgO') * 0.08 + this.g('ZrO2') * 0.20
+      - this.g('Na2O') * 0.12 - this.g('K2O') * 0.14;
+    return clip(v, 0.0, 10.0);
+  }
+  color() {
+    const Fe = this.g('Fe2O3'), Cr = this.g('Cr2O3'), Mn = this.g('MnO2'), Co = this.g('CoO');
+    const absorption = Fe * 8.5 + Cr * 25.0 + Mn * 5.0 + Co * 30.0;
+    let color;
+    if (Cr > 0.05) color = 'Green'; else if (Fe > 0.3) color = 'Amber/Brown'; else if (Mn > 0.1) color = 'Purple';
+    else if (absorption < 0.1) color = 'Clear/Colorless'; else color = 'Pale Green';
+    return { color, absorption_index: Math.round(absorption * 1000) / 1000 };
+  }
+  density() { let d = 0.0; for (const ox of Object.keys(DENSITY_CONTRIB)) d += (this.comp[ox] ?? 0.0) * DENSITY_CONTRIB[ox] / 100.0; return clip(d, 2.2, 5.5); }
+}
+
+class MeltPool {
+  constructor(Tfurnace, pull, glass) { this.Tf = Tfurnace + 273.15; this.pull = pull; this.gp = glass; }
+  residenceTime() {
+    const area = 0.35 * Math.pow(this.pull, 0.7), depth = 1.2 + 0.001 * this.pull;
+    const mass = 2.5 * (area * depth);
+    return clip(24.0 * mass / Math.max(this.pull, 1.0), 6.0, 72.0);
+  }
+  bubbleRemoval(t) {
+    const eta = this.gp.viscosity(this.Tf - 273.15 - 50.0);
+    const k = 0.5 / Math.max(Math.log10(eta + 1) + 1.0, 0.1);
+    return 100.0 * Math.exp(-k * t);
+  }
+}
+
+class Energy {
+  constructor(Tf, fuel, batch, glass, comb, ebPct) { this.Tf = Tf; this.fuel = fuel; this.batch = batch; this.gp = glass; this.comb = comb; this.eb = ebPct / 100.0; }
+  sensible() { return CP_GLASS_MELT * (this.Tf - 20.0) / 1e6; }
+  latent() { return 250.0 + (this.gp.g('SiO2', 72.0) - 72.0) * 2.5; }
+  reaction() { return this.batch.decomposition()[0]; }
+  radiation() { const T = this.Tf + 273.15; return 0.7 * SB * (Math.pow(T, 4) - Math.pow(T_AMB, 4)) * 0.40 * 86400 / 1e6; }
+  flue() { return this.comb.flueHeatLoss(1200.0 + 273.15, this.fuel); }
+  electric() { return this.fuel * this.eb; }
+  total() { return Math.max(this.sensible() + this.latent() + this.reaction() + this.radiation() + this.flue() - this.electric(), 500.0); }
+  efficiency() { const u = this.sensible() + this.latent() + this.reaction(); return clip(100.0 * u / Math.max(this.total(), 1.0), 20.0, 85.0); }
+  breakdown() {
+    return { 'Sensible Heat': this.sensible(), 'Latent Heat': this.latent(), 'Batch Reactions': this.reaction(),
+      'Radiation Loss': this.radiation(), 'Flue Gas Loss': this.flue(), 'Electric Boost': -this.electric() };
+  }
+}
+
+class Exergy {
+  constructor(TfK, energy, comb) { this.TfK = TfK; this.eb = energy; this.comb = comb; this.T0 = T_AMB; }
+  carnot(Ts) { return Math.max(0.0, 1.0 - this.T0 / Math.max(Ts, this.T0 + 1)); }
+  fuel() { return this.eb.fuel * (EXERGY_FACTOR[this.comb.fuel] ?? 1.04); }
+  product() {
+    const T = this.eb.Tf + 273.15, cp = CP_GLASS_MELT / 1e6;
+    return 1000 * cp * (T - this.T0) - this.T0 * (1000 * cp * Math.log(T / this.T0));
+  }
+  destruction() {
+    const exIn = this.fuel() + this.eb.electric(), exOut = this.product();
+    const lossRad = this.eb.radiation() * this.carnot(this.eb.Tf + 273.15);
+    const lossFlue = this.eb.flue() * this.carnot(1200 + 273.15);
+    return Math.max(exIn - exOut - lossRad - lossFlue, 0.0);
+  }
+  efficiency() { return clip(100.0 * this.product() / Math.max(this.fuel() + this.eb.electric(), 1.0), 10.0, 85.0); }
+  summary() {
+    const r1 = (x) => Math.round(x * 10) / 10;
+    return { 'Fuel Exergy (MJ/ton)': r1(this.fuel()), 'Product Exergy (MJ/ton)': r1(this.product()),
+      'Exergy Destruction (MJ/ton)': r1(this.destruction()), 'Exergy Efficiency (%)': r1(this.efficiency()) };
+  }
+}
+
+class Sustain {
+  constructor(comb, batch, energy, ebPct) { this.comb = comb; this.batch = batch; this.eb = energy; this.pct = ebPct; }
+  combustionCO2() { return this.comb.co2PerTon(this.eb.fuel * (1 - this.pct / 100.0)); }
+  carbonateCO2() { return this.batch.decomposition()[1] * 1000.0; }
+  electricCO2() { return (this.eb.electric() * 1000.0 / 3.6) * 0.25; }
+  culletSaving() { const base = this.combustionCO2() + this.carbonateCO2(); return base * this.batch.fCullet * (1.0 - this.batch.co2Factor); }
+  totalCO2() { return Math.max(0.0, this.combustionCO2() + this.carbonateCO2() + this.electricCO2() - this.culletSaving()); }
+  index() {
+    const co2s = Math.max(0, 100 - this.totalCO2() / 5.0), effs = this.eb.efficiency(), culs = this.batch.fCullet * 100.0;
+    const nox = this.comb.noxIndex(this.comb.adiabaticFlameT()), noxs = Math.max(0, 100 - nox);
+    return clip(0.4 * co2s + 0.3 * effs + 0.2 * culs + 0.1 * noxs, 0.0, 100.0);
+  }
+  cost() {
+    return this.eb.fuel * 0.008 + this.eb.electric() * 0.025 + 25.0 + this.totalCO2() * 0.07
+      + this.batch.fCullet * 15.0 + (1 - this.batch.fCullet) * 35.0;
+  }
+}
+
+class Fining {
+  constructor(comp, Tfining, glass) { this.comp = comp; this.T = Tfining; this.gp = glass; }
+  so3Release() { const frac = 1.0 / (1.0 + Math.exp(-0.05 * (this.T - 1380.0))); return (this.comp.SO3 ?? 0.3) * frac * 10.0; }
+  feRatio() { return Math.exp(4.2 - 6000.0 / (this.T + 273.15)); }
+  thermalStress(Texit, cooling = 5.0) {
+    const Tg = this.gp.Tg(), eta = this.gp.viscosity(Texit);
+    const risk = Texit < Tg + 50 ? Math.min(10.0, cooling * 0.5 * (Tg + 50 - Texit) / 50.0) : Math.max(0.0, 1.0 - Math.log10(eta) / 6.0);
+    return Math.round(clip(risk, 0.0, 10.0) * 100) / 100;
+  }
+}
+
+function buildModels(p) {
+  const Tf = p.T_furnace ?? 1500.0, fuelMJ = p.fuel_MJ_ton ?? 5500.0, eb = p.electric_boost ?? 10.0, pull = p.pull_rate ?? 150.0;
+  const o2 = p.O2_fraction ?? 0.21, fuel = p.fuel_type ?? 'CH4', cf = p.cullet_fraction ?? 0.30, ct = p.cullet_type ?? 'Container (soda-lime)';
+  const raw = {}; let total = 0.0;
+  for (const k of OXIDES) { raw[k] = p[k] ?? 0.0; total += raw[k]; }
+  if (total < 1e-3) total = 100.0;
+  const comp = {}; for (const k of OXIDES) comp[k] = raw[k] / total * 100.0;
+  const comb = new Combustion(fuel, o2, 0.10), gp = new Glass(comp), batch = new Batch(comp, cf, ct);
+  const en = new Energy(Tf, fuelMJ, batch, gp, comb, eb), pool = new MeltPool(Tf, pull, gp);
+  const fin = new Fining(comp, Tf - 50.0, gp), ex = new Exergy(Tf + 273.15, en, comb), su = new Sustain(comb, batch, en, eb);
+  return { Tf, pull, comp, comb, gp, batch, en, pool, fin, ex, su };
+}
+
+function run(p) {
+  const m = buildModels(p);
+  const Tflame = m.comb.adiabaticFlameT(), Tg = m.gp.Tg(), eta = m.gp.viscosity(m.Tf);
+  return {
+    T_furnace_C: m.Tf, T_flame_K: Tflame, T_flame_C: Tflame - 273.15, T_liquidus_C: m.gp.Tliquidus(), Tg_C: Tg,
+    viscosity_Pa_s: eta, log_viscosity: Math.log10(eta + 1e-10), residence_time_h: m.pool.residenceTime(),
+    energy_total_MJ_ton: m.en.total(), energy_breakdown: m.en.breakdown(), furnace_efficiency_pct: m.en.efficiency(),
+    CO2_total_kg_ton: m.su.totalCO2(), CO2_combustion: m.su.combustionCO2(), CO2_carbonate: m.su.carbonateCO2(),
+    CO2_electric: m.su.electricCO2(), CO2_cullet_saving: m.su.culletSaving(),
+    exergy_efficiency_pct: m.ex.efficiency(), exergy_destruction_MJ_ton: m.ex.destruction(), exergy_summary: m.ex.summary(),
+    durability_index: m.gp.durability(), color_info: m.gp.color(), density_g_cm3: m.gp.density(),
+    Fe_ratio: m.fin.feRatio(), SO3_release_kg_ton: m.fin.so3Release(), thermal_stress_risk: m.fin.thermalStress(Tg + 30.0),
+    production_cost_EUR_ton: m.su.cost(), sustainability_index: m.su.index(), NOx_index: m.comb.noxIndex(Tflame),
+    composition: m.comp, _m: m
+  };
+}
+
+/* =====================================================================================
+   PART 2. ML SURROGATE (gradient boosting regressor + bounded search)
+   ===================================================================================== */
+const OPT_FIELDS = [
+  { k: 'T_furnace', label: 'T furnace', unit: '°C', lo: 1350, hi: 1650, d: 0 },
+  { k: 'fuel_MJ_ton', label: 'Fuel input', unit: 'MJ/ton', lo: 3000, hi: 8000, d: 0 },
+  { k: 'electric_boost', label: 'Electric boost', unit: '%', lo: 0, hi: 50, d: 1 },
+  { k: 'pull_rate', label: 'Pull rate', unit: 'ton/day', lo: 50, hi: 300, d: 0 },
+  { k: 'O2_fraction', label: 'O₂ concentration', unit: '%', lo: 0.21, hi: 1.0, d: 1, scale: 100 },
+  { k: 'cullet_fraction', label: 'Cullet fraction', unit: '%', lo: 0.0, hi: 0.90, d: 1, scale: 100 },
+  { k: 'SiO2', label: 'SiO₂', unit: '%', lo: 68, hi: 76, d: 2 },
+  { k: 'Na2O', label: 'Na₂O', unit: '%', lo: 11, hi: 17, d: 2 },
+  { k: 'CaO', label: 'CaO', unit: '%', lo: 4, hi: 12, d: 2 },
+  { k: 'MgO', label: 'MgO', unit: '%', lo: 1, hi: 4, d: 2 },
+  { k: 'Al2O3', label: 'Al₂O₃', unit: '%', lo: 0.5, hi: 3.5, d: 2 }
+];
+const LO = OPT_FIELDS.map((f) => f.lo), HI = OPT_FIELDS.map((f) => f.hi);
+const FIXED_MINOR = { Fe2O3: 0.1, Cr2O3: 0.0, SO3: 0.3, MnO2: 0.0, K2O: 0.3, TiO2: 0.05, B2O3: 0.0, PbO: 0.0, ZrO2: 0.0 };
+
+/* Objectives the surrogate learns: [CO2, energy, durability] for a vector of the 11 optimisation variables. */
+function surrogateObjectives(x) {
+  const p = Object.assign({ fuel_type: 'CH4', cullet_type: 'Container (soda-lime)' }, FIXED_MINOR);
+  OPT_FIELDS.forEach((f, i) => { p[f.k] = x[i]; });
+  const m = buildModels(p);
+  return [m.su.totalCO2(), m.en.total(), m.gp.durability()];
+}
+
+function mulberry32(a) {
+  return function () { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+
+function presortColumns(X) {
+  const n = X.length, nf = X[0].length, orders = [];
+  for (let f = 0; f < nf; f++) {
+    const idx = Array.from({ length: n }, (_, i) => i);
+    idx.sort((a, b) => X[a][f] - X[b][f]);
+    orders.push(Int32Array.from(idx));
+  }
+  return orders;
+}
+
+/* Regression tree, exact greedy splits, squared error (same criterion family as sklearn's friedman_mse). */
+function fitTree(X, r, orders, maxDepth) {
+  const n = r.length, nf = orders.length;
+  let s0 = 0; for (let i = 0; i < n; i++) s0 += r[i];
+  const nodes = [{ n, sum: s0, leaf: true }];
+  const nodeOf = new Int32Array(n);
+  let frontier = [0];
+  for (let depth = 0; depth < maxDepth; depth++) {
+    const next = [];
+    for (const id of frontier) {
+      const nd = nodes[id]; if (nd.n < 2) continue;
+      let best = null, bestGain = 1e-10;
+      for (let f = 0; f < nf; f++) {
+        const ord = orders[f]; let sl = 0, nl = 0, prev = -1;
+        for (let k = 0; k < n; k++) {
+          const i = ord[k]; if (nodeOf[i] !== id) continue;
+          if (nl > 0) {
+            const xv = X[prev][f], xn = X[i][f];
+            if (xn > xv) {
+              const nr = nd.n - nl, sr = nd.sum - sl;
+              const gain = sl * sl / nl + sr * sr / nr - nd.sum * nd.sum / nd.n;
+              if (gain > bestGain) { bestGain = gain; best = { f, thr: (xv + xn) / 2, nl, sl }; }
+            }
+          }
+          sl += r[i]; nl++; prev = i;
+        }
+      }
+      if (!best) continue;
+      const L = nodes.length; nodes.push({ n: best.nl, sum: best.sl, leaf: true });
+      const Rr = nodes.length; nodes.push({ n: nd.n - best.nl, sum: nd.sum - best.sl, leaf: true });
+      nd.leaf = false; nd.f = best.f; nd.thr = best.thr; nd.l = L; nd.r = Rr;
+      for (let i = 0; i < n; i++) if (nodeOf[i] === id) nodeOf[i] = X[i][best.f] <= best.thr ? L : Rr;
+      next.push(L, Rr);
+    }
+    frontier = next; if (!frontier.length) break;
+  }
+  for (const nd of nodes) if (nd.leaf) nd.v = nd.sum / nd.n;
+  return nodes;
+}
+function predictTree(nodes, x) {
+  let i = 0;
+  while (!nodes[i].leaf) i = x[nodes[i].f] <= nodes[i].thr ? nodes[i].l : nodes[i].r;
+  return nodes[i].v;
+}
+
+class GBR {
+  constructor(nTrees = 150, depth = 4, lr = 0.1) { this.nTrees = nTrees; this.depth = depth; this.lr = lr; this.trees = []; this.init = 0; }
+  fit(X, y, orders) {
+    const n = y.length; let s = 0; for (const v of y) s += v; this.init = s / n; this.trees = [];
+    const F = new Float64Array(n).fill(this.init), r = new Float64Array(n);
+    for (let m = 0; m < this.nTrees; m++) {
+      for (let i = 0; i < n; i++) r[i] = y[i] - F[i];
+      const t = fitTree(X, r, orders, this.depth); this.trees.push(t);
+      for (let i = 0; i < n; i++) F[i] += this.lr * predictTree(t, X[i]);
+    }
+    return this;
+  }
+  predict(x) { let s = this.init; for (const t of this.trees) s += this.lr * predictTree(t, x); return s; }
+}
+
+function r2(yTrue, yPred) {
+  const mean = yTrue.reduce((a, b) => a + b, 0) / yTrue.length;
+  let ssr = 0, sst = 0;
+  for (let i = 0; i < yTrue.length; i++) { ssr += (yTrue[i] - yPred[i]) ** 2; sst += (yTrue[i] - mean) ** 2; }
+  return 1 - ssr / sst;
+}
+
+function sampleVectors(n, rng) {
+  const out = [];
+  for (let i = 0; i < n; i++) out.push(Float64Array.from(OPT_FIELDS.map((f) => f.lo + (f.hi - f.lo) * rng())));
+  return out;
+}
+
+function trainSurrogate(nTrain = 400, nTest = 150, seed = 42) {
+  const rng = mulberry32(seed);
+  const X = sampleVectors(nTrain, rng), Xt = sampleVectors(nTest, rng);
+  const Y = X.map(surrogateObjectives), Yt = Xt.map(surrogateObjectives);
+  const orders = presortColumns(X);
+  const names = ['co2', 'energy', 'durability'], models = {}, fit = {};
+  names.forEach((nm, j) => {
+    const y = Y.map((v) => v[j]), yt = Yt.map((v) => v[j]);
+    const mdl = new GBR().fit(X, y, orders); models[nm] = mdl;
+    const pr = Xt.map((x) => mdl.predict(x));
+    fit[nm] = { r2: r2(yt, pr), true: yt, pred: pr };
+  });
+  return { models, fit, nTrain, nTest };
+}
+
+/* Bounded search on the surrogate: random multi-start, then coordinate pattern search from the best starts. */
+function searchSurrogate(model, sign, x0, seed = 7) {
+  const rng = mulberry32(seed), nd = LO.length;
+  const f = (x) => sign * model.predict(x);
+  const clamp = (x) => { for (let d = 0; d < nd; d++) x[d] = clip(x[d], LO[d], HI[d]); return x; };
+  const origin = { x: clamp(Float64Array.from(x0)) }; origin.f = f(origin.x);
+  const starts = [origin];
+  for (const x of sampleVectors(2500, rng)) starts.push({ x, f: f(x) });
+  starts.sort((a, b) => a.f - b.f);
+  const picks = starts.slice(0, 10); if (!picks.includes(origin)) picks.push(origin);
+  let best = null;
+  for (const s of picks) {
+    let x = Float64Array.from(s.x), fx = s.f; const step = Float64Array.from(LO.map((lo, d) => 0.2 * (HI[d] - lo)));
+    for (let it = 0; it < 120; it++) {
+      let improved = false;
+      for (let d = 0; d < nd; d++) for (const dir of [-1, 1]) {
+        const c = Float64Array.from(x); c[d] = clip(c[d] + dir * step[d], LO[d], HI[d]);
+        const fc = f(c); if (fc < fx - 1e-12) { x = c; fx = fc; improved = true; }
+      }
+      if (!improved) { let small = true; for (let d = 0; d < nd; d++) { step[d] *= 0.5; if (step[d] > 1e-4 * (HI[d] - LO[d])) small = false; } if (small) break; }
+    }
+    if (!best || fx < best.f) best = { x, f: fx };
+  }
+  return { x: best.x, value: sign * best.f };
+}
+
+/* =====================================================================================
+   PART 3. UI
+   ===================================================================================== */
+const $ = (s, r = document) => r.querySelector(s);
+const nf = (x, d = 0) => Number.isFinite(x) ? x.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }) : '–';
+const fmtEta = (v) => (v < 0.1 || v >= 1e6) ? v.toExponential(2) : nf(v, 1);
+const sg = (v, d = 0) => (v < 0 ? '−' : '') + nf(Math.abs(v), d);
+
+const DEFAULTS = { T_furnace: 1500, fuel_MJ_ton: 5500, electric_boost: 10, pull_rate: 150, O2_pct: 21, cullet_pct: 30,
+  fuel_type: 'CH4', cullet_type: 'Container (soda-lime)',
+  SiO2: 72.0, Na2O: 14.0, CaO: 10.0, MgO: 2.0, Al2O3: 1.5, Fe2O3: 0.10, Cr2O3: 0.0, SO3: 0.3, MnO2: 0.0, K2O: 0.3, TiO2: 0.05,
+  B2O3: 0.0, PbO: 0.0, ZrO2: 0.0 };
+const GROUPS = [
+  { title: 'Furnace operation', open: true, items: [
+    { k: 'T_furnace', l: 'T<sub>furnace</sub>', u: '°C', min: 1350, max: 1650, step: 1, d: 0 },
+    { k: 'fuel_MJ_ton', l: 'Fuel input', u: 'MJ/ton', min: 3000, max: 8000, step: 50, d: 0 },
+    { k: 'electric_boost', l: 'Electric boost', u: '%', min: 0, max: 50, step: 0.5, d: 1 },
+    { k: 'pull_rate', l: 'Pull rate', u: 'ton/day', min: 50, max: 300, step: 5, d: 0 },
+    { k: 'O2_pct', l: 'O<sub>2</sub> enrichment', u: '%', min: 21, max: 100, step: 0.5, d: 1 },
+    { k: 'cullet_pct', l: 'Cullet fraction', u: '%', min: 0, max: 95, step: 1, d: 0 },
+    { k: 'fuel_type', l: 'Fuel type', select: [['CH4', 'CH₄ (methane)'], ['H2', 'H₂ (hydrogen)'], ['C3H8', 'C₃H₈ (propane)']] },
+    { k: 'cullet_type', l: 'Cullet type', select: Object.keys(CULLET_CO2_FACTOR).map((k) => [k, k]) } ] },
+  { title: 'Major oxides', open: true, items: [
+    { k: 'SiO2', l: 'SiO<sub>2</sub>', u: '%', min: 68, max: 76, step: 0.1, d: 1 },
+    { k: 'Na2O', l: 'Na<sub>2</sub>O', u: '%', min: 11, max: 17, step: 0.1, d: 1 },
+    { k: 'CaO', l: 'CaO', u: '%', min: 4, max: 12, step: 0.1, d: 1 },
+    { k: 'MgO', l: 'MgO', u: '%', min: 0.5, max: 4, step: 0.1, d: 1 },
+    { k: 'Al2O3', l: 'Al<sub>2</sub>O<sub>3</sub>', u: '%', min: 0.5, max: 4, step: 0.1, d: 1 } ] },
+  { title: 'Minor and trace oxides', open: true, items: [
+    { k: 'Fe2O3', l: 'Fe<sub>2</sub>O<sub>3</sub>', u: '%', min: 0, max: 1, step: 0.01, d: 3 },
+    { k: 'Cr2O3', l: 'Cr<sub>2</sub>O<sub>3</sub>', u: '%', min: 0, max: 0.5, step: 0.005, d: 3 },
+    { k: 'SO3', l: 'SO<sub>3</sub>', u: '%', min: 0, max: 0.5, step: 0.01, d: 3 },
+    { k: 'MnO2', l: 'MnO<sub>2</sub>', u: '%', min: 0, max: 0.5, step: 0.01, d: 3 },
+    { k: 'K2O', l: 'K<sub>2</sub>O', u: '%', min: 0, max: 1, step: 0.01, d: 3 },
+    { k: 'TiO2', l: 'TiO<sub>2</sub>', u: '%', min: 0, max: 1, step: 0.01, d: 3 } ] },
+  { title: 'Advanced additions', open: true, items: [
+    { k: 'B2O3', l: 'B<sub>2</sub>O<sub>3</sub>', u: '%', min: 0, max: 15, step: 0.1, d: 1 },
+    { k: 'PbO', l: 'PbO', u: '%', min: 0, max: 25, step: 0.1, d: 1 },
+    { k: 'ZrO2', l: 'ZrO<sub>2</sub>', u: '%', min: 0, max: 5, step: 0.05, d: 2 } ] }
+];
+const PRESETS = [
+  { n: 'Baseline', v: {} }, { n: '70% cullet', v: { cullet_pct: 70 } }, { n: 'Hydrogen firing', v: { fuel_type: 'H2' } },
+  { n: 'Oxy-fuel', v: { O2_pct: 100 } }, { n: '40% electric boost', v: { electric_boost: 40 } }
+];
+
+const S = Object.assign({}, DEFAULTS);
+const toParams = () => Object.assign({}, S, { O2_fraction: S.O2_pct / 100, cullet_fraction: S.cullet_pct / 100 });
+let result = null, activeTab = 'kpis', sur = null, lastOpt = null;
+
+/* ---- controls ---- */
+const ITEM = {}; GROUPS.forEach((g) => g.items.forEach((it) => { ITEM[it.k] = it; }));
+function buildControls() {
+  const host = $('#controls');
+  host.innerHTML = GROUPS.map((g) => `<details class="group"${g.open ? ' open' : ''}><summary>${g.title}</summary>${g.items.map((it) => {
+    if (it.select) return `<div class="ctl"><label for="c-${it.k}"><span>${it.l}</span></label><select id="c-${it.k}" data-k="${it.k}">${it.select.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select></div>`;
+    return `<div class="ctl"><label for="c-${it.k}"><span>${it.l}</span><output id="o-${it.k}" for="c-${it.k}"></output></label><input type="range" id="c-${it.k}" data-k="${it.k}" min="${it.min}" max="${it.max}" step="${it.step}"></div>`;
+  }).join('')}</details>`).join('');
+  host.querySelectorAll('input[type=range]').forEach((el) => el.addEventListener('input', () => { S[el.dataset.k] = parseFloat(el.value); syncOne(el.dataset.k); schedule(); }));
+  host.querySelectorAll('select').forEach((el) => el.addEventListener('change', () => { S[el.dataset.k] = el.value; schedule(); }));
+  if (window.matchMedia('(max-width: 960px)').matches) host.querySelectorAll('details.group').forEach((d) => { d.open = false; });
+}
+function syncOne(k) {
+  const it = ITEM[k], el = $('#c-' + k); if (!it || !el) return;
+  if (it.select) { el.value = S[k]; return; }
+  el.value = S[k]; $('#o-' + k).textContent = nf(S[k], it.d) + ' ' + it.u;
+}
+function syncAll() { Object.keys(ITEM).forEach(syncOne); }
+function buildPresets() {
+  $('#presets').innerHTML = PRESETS.map((p, i) => `<button type="button" data-i="${i}" aria-pressed="false">${p.n}</button>`).join('');
+  $('#presets').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+    Object.assign(S, DEFAULTS, PRESETS[+b.dataset.i].v); syncAll(); schedule();
+  }));
+}
+function markPreset() {
+  $('#presets').querySelectorAll('button').forEach((b, i) => {
+    const t = Object.assign({}, DEFAULTS, PRESETS[i].v);
+    b.setAttribute('aria-pressed', String(Object.keys(DEFAULTS).every((k) => S[k] === t[k])));
+  });
+}
+
+/* ---- scheduling ---- */
+let pending = false;
+function schedule() { if (pending) return; pending = true; requestAnimationFrame(() => { pending = false; update(); }); }
+function update() {
+  result = run(toParams());
+  const r = result;
+  $('#status').textContent = `Updated. T_flame ${nf(r.T_flame_C, 0)} °C · CO₂ ${nf(r.CO2_total_kg_ton, 1)} kg/ton · viscosity at T_furnace ${fmtEta(r.viscosity_Pa_s)} Pa·s`;
+  markPreset();
+  if (activeTab === 'kpis') renderKPIs(r);
+  else if (activeTab === 'charts') renderCharts(r);
+  else renderOptimizerCurrent();
+}
+
+/* ---- KPIs ---- */
+const atLimit = (v, lo, hi) => ((lo !== null && v <= lo + 1e-9) || (hi !== null && v >= hi - 1e-9)) ? '<span class="tag" title="The model clips this output at a fixed limit, so the value is at that limit.">at limit</span>' : '';
+function bars(items) {
+  const max = Math.max(...items.map((i) => Math.abs(i.v)), 1e-9);
+  return '<div class="bars">' + items.map((i) => `<div><div class="bt"><span>${i.l}</span><span>${sg(i.v, i.d ?? 0)}</span></div><div class="track"><i style="width:${(Math.abs(i.v) / max * 100).toFixed(1)}%;background:var(--${i.c})"></i></div></div>`).join('') + '</div>';
+}
+function rows(list) { return '<dl class="rows">' + list.map(([t, v, u, tag]) => `<div><dt>${t}</dt><dd>${v}${u ? `<small>${u}</small>` : ''}${tag || ''}</dd></div>`).join('') + '</dl>'; }
+const SUB = { SiO2: 'SiO₂', Na2O: 'Na₂O', CaO: 'CaO', MgO: 'MgO', Al2O3: 'Al₂O₃', Fe2O3: 'Fe₂O₃', Cr2O3: 'Cr₂O₃', SO3: 'SO₃',
+  MnO2: 'MnO₂', K2O: 'K₂O', TiO2: 'TiO₂', B2O3: 'B₂O₃', PbO: 'PbO', ZrO2: 'ZrO₂' };
+
+function renderKPIs(r) {
+  const si = r.sustainability_index, st = si > 60 ? ['good', 'Good'] : si > 35 ? ['warn', 'Fair'] : ['bad', 'Poor'];
+  const eb = r.energy_breakdown, ex = r.exergy_summary;
+  const comp = Object.keys(r.composition).filter((k) => r.composition[k] > 0.0005).map((k) => `${SUB[k]} ${nf(r.composition[k], 2)}`).join(' · ');
+  $('#panel-kpis').innerHTML = `
+    <div class="headline">
+      <div><div class="k-label">Energy demand</div><div class="k-val">${nf(r.energy_total_MJ_ton, 0)}</div><div class="k-unit">MJ/ton</div></div>
+      <div><div class="k-label">CO₂ total</div><div class="k-val">${nf(r.CO2_total_kg_ton, 1)}</div><div class="k-unit">kg/ton</div></div>
+      <div><div class="k-label">Furnace efficiency</div><div class="k-val">${nf(r.furnace_efficiency_pct, 1)}</div><div class="k-unit">% ${atLimit(r.furnace_efficiency_pct, 20, 85)}</div></div>
+      <div><div class="k-label">Exergy efficiency</div><div class="k-val">${nf(r.exergy_efficiency_pct, 1)}</div><div class="k-unit">% ${atLimit(r.exergy_efficiency_pct, 10, 85)}</div></div>
+      <div><div class="k-label">Sustainability</div><div class="k-val">${nf(si, 1)}</div><div class="k-unit">/ 100</div><div class="state ${st[0]}"><i></i>${st[1]}</div></div>
+    </div>
+    <p class="comp-line">Glass composition, wt% normalised: ${comp}</p>
+    <div class="grid2">
+      <div class="sect"><h3>Energy balance, MJ/ton</h3>${bars([
+        { l: 'Sensible heat', v: eb['Sensible Heat'], c: 's-blue', d: 2 }, { l: 'Latent heat', v: eb['Latent Heat'], c: 's-blue', d: 0 },
+        { l: 'Batch reactions', v: eb['Batch Reactions'], c: 's-blue', d: 0 }, { l: 'Radiation loss', v: eb['Radiation Loss'], c: 's-orange', d: 0 },
+        { l: 'Flue gas loss', v: eb['Flue Gas Loss'], c: 's-orange', d: 0 }, { l: 'Electric boost', v: eb['Electric Boost'], c: 's-violet', d: 0 }])}
+        <div class="total"><span>Total demand</span><span>${nf(r.energy_total_MJ_ton, 0)}</span></div></div>
+      <div class="sect"><h3>CO₂ sources, kg/ton</h3>${bars([
+        { l: 'Fuel combustion', v: r.CO2_combustion, c: 's-orange', d: 0 }, { l: 'Carbonate decomposition', v: r.CO2_carbonate, c: 's-blue', d: 0 },
+        { l: 'Grid electricity', v: r.CO2_electric, c: 's-violet', d: 0 }, { l: 'Cullet saving', v: -r.CO2_cullet_saving, c: 's-teal', d: 0 }])}
+        <div class="total"><span>Total</span><span>${nf(r.CO2_total_kg_ton, 1)}</span></div></div>
+      <div class="sect"><h3>Exergy</h3>${rows([
+        ['Fuel exergy', nf(ex['Fuel Exergy (MJ/ton)'], 1), 'MJ/ton'], ['Product exergy', nf(ex['Product Exergy (MJ/ton)'], 1), 'MJ/ton'],
+        ['Exergy destruction', nf(ex['Exergy Destruction (MJ/ton)'], 1), 'MJ/ton', atLimit(r.exergy_destruction_MJ_ton, 0, null)],
+        ['Exergy efficiency', nf(ex['Exergy Efficiency (%)'], 1), '%', atLimit(r.exergy_efficiency_pct, 10, 85)]])}</div>
+      <div class="sect"><h3>Melt and glass</h3>${rows([
+        ['Flame temperature', nf(r.T_flame_C, 0), '°C'], ['Liquidus temperature', nf(r.T_liquidus_C, 0), '°C', atLimit(r.T_liquidus_C, 900, 1350)],
+        ['Glass transition Tg', nf(r.Tg_C, 0), '°C', atLimit(r.Tg_C, 300, 900)], ['Viscosity at T furnace', fmtEta(r.viscosity_Pa_s), 'Pa·s'],
+        ['Melt residence time', nf(r.residence_time_h, 1), 'h', atLimit(r.residence_time_h, 6, 72)], ['Density', nf(r.density_g_cm3, 3), 'g/cm³'],
+        ['Durability index', nf(r.durability_index, 2), '/ 10', atLimit(r.durability_index, 0, 10)],
+        ['Colour', r.color_info.color, 'abs. ' + nf(r.color_info.absorption_index, 3)],
+        ['Thermal stress risk', nf(r.thermal_stress_risk, 1), '/ 10'], ['NOx index', nf(r.NOx_index, 2), 'relative', atLimit(r.NOx_index, null, 100)]])}</div>
+      <div class="sect"><h3>Fining and cost</h3>${rows([
+        ['Fe²⁺ / Fe³⁺ ratio', nf(r.Fe_ratio, 4), ''], ['SO₃ released', nf(r.SO3_release_kg_ton, 2), 'kg/ton'],
+        ['Production cost', nf(r.production_cost_EUR_ton, 1), '€/ton']])}</div>
+    </div>`;
+}
+
+/* ---- charts ---- */
+function theme() {
+  const cs = getComputedStyle(document.documentElement), g = (n) => cs.getPropertyValue(n).trim();
+  return { fg: g('--fg'), fg2: g('--fg-2'), fg3: g('--fg-3'), line: g('--line'), grid: g('--grid'), surface: g('--surface'), s2: g('--surface-2'),
+    blue: g('--s-blue'), orange: g('--s-orange'), teal: g('--s-teal'), violet: g('--s-violet'), accent: g('--accent'), mono: g('--mono') };
+}
+function rgba(hex, a) {
+  const h = hex.replace('#', ''); const n = parseInt(h.length === 3 ? h.split('').map((c) => c + c).join('') : h, 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+const lin = (a, b, n) => Array.from({ length: n }, (_, i) => a + (b - a) * i / (n - 1));
+function axis(t, title, extra) {
+  return Object.assign({ title: { text: title || '', font: { color: t.fg2, size: 11 }, standoff: 8 }, gridcolor: t.grid, gridwidth: 1, zeroline: false,
+    linecolor: t.line, tickcolor: t.line, ticks: 'outside', ticklen: 3, tickfont: { color: t.fg2, size: 11 }, automargin: true }, extra || {});
+}
+function baseLayout(t, o) {
+  return Object.assign({ paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { family: t.mono, color: t.fg2, size: 11 },
+    margin: { l: 62, r: 14, t: 30, b: 46 }, hovermode: 'x unified', showlegend: true,
+    hoverlabel: { bgcolor: t.s2, bordercolor: t.line, font: { color: t.fg, family: t.mono, size: 11 } },
+    legend: { orientation: 'h', x: 0, y: 1.0, yanchor: 'bottom', font: { color: t.fg2, size: 11 } } }, o);
+}
+function line(t, name, x, y, color, o) {
+  return Object.assign({ type: 'scatter', mode: 'lines', name, x, y, line: { color, width: 2 }, hovertemplate: '%{y:,.1f}<extra>' + name + '</extra>' }, o || {});
+}
+function marker(t, x, y, o) {
+  return Object.assign({ type: 'scatter', mode: 'markers', name: 'Current setting', x: [x], y: [y], hoverinfo: 'skip', showlegend: false,
+    marker: { symbol: 'diamond', size: 11, color: t.accent, line: { color: t.surface, width: 2 } } }, o || {});
+}
+function stacked(t, xTitle, y1, y2, extra) {
+  return baseLayout(t, Object.assign({
+    grid: { rows: 2, columns: 1, pattern: 'independent', roworder: 'top to bottom', ygap: 0.16 },
+    xaxis: axis(t, '', { showticklabels: false }), xaxis2: axis(t, xTitle, { matches: 'x' }),
+    yaxis: axis(t, y1), yaxis2: axis(t, y2), margin: { l: 62, r: 14, t: 30, b: 46 } }, extra || {}));
+}
+function tbl(headers, rowsArr) {
+  return `<div class="tbl"><table><thead><tr>${headers.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rowsArr.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+}
+
+function chartSpecs(r) {
+  const t = theme(), p = toParams(), m = r._m, spec = [];
+
+  // 1 viscosity
+  { const T = lin(700, 1700, 300), y = T.map((x) => Math.log10(clip(m.gp.viscosity(x), 1e-3, 1e14)));
+    const refs = [[1.0, 'Melting point (log η = 1)', true], [7.6, 'Softening point (log η = 7.6)', false], [12.0, 'Tg (log η ≈ 12)', false]];
+    spec.push({ id: 'visc', title: 'Viscosity vs temperature', cap: 'VFT model. The diamond marks the current furnace temperature.', h: 340,
+      data: [line(t, 'log₁₀ η (Pa·s)', T, y, t.blue, { fill: 'tozeroy', fillcolor: rgba(t.blue, 0.10), hovertemplate: '%{y:.2f}<extra>log₁₀ η</extra>' }),
+        marker(t, m.Tf, m.gp.logViscosity(m.Tf), { showlegend: true })],
+      layout: baseLayout(t, { xaxis: axis(t, 'Temperature (°C)'), yaxis: axis(t, 'log₁₀ η (Pa·s)'),
+        shapes: refs.map(([v]) => ({ type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: v, y1: v, line: { color: t.fg3, width: 1, dash: 'dot' } })),
+        annotations: refs.map(([v, s, left]) => ({ xref: 'paper', x: left ? 0.01 : 1, xanchor: left ? 'left' : 'right', yref: 'y', y: v, yanchor: 'bottom', text: s, showarrow: false, font: { color: t.fg3, size: 10 } })) }),
+      table: () => tbl(['T (°C)', 'log₁₀ η'], T.filter((_, i) => i % 15 === 0).map((x) => [nf(x, 0), nf(Math.log10(clip(m.gp.viscosity(x), 1e-3, 1e14)), 2)])) }); }
+
+  // 2 energy and CO2 vs cullet
+  { const cu = lin(0, 0.90, 30), en = [], co = [];
+    cu.forEach((cf) => { const q = run(Object.assign({}, p, { cullet_fraction: cf })); en.push(q.energy_total_MJ_ton); co.push(q.CO2_total_kg_ton); });
+    const x = cu.map((c) => c * 100);
+    spec.push({ id: 'cullet', title: 'Energy and CO₂ vs cullet fraction', cap: 'Two panels, one shared x axis.', h: 420 , wide: false,
+      data: [line(t, 'Energy (MJ/ton)', x, en, t.orange), line(t, 'CO₂ (kg/ton)', x, co, t.blue, { xaxis: 'x2', yaxis: 'y2' }),
+        marker(t, S.cullet_pct, r.energy_total_MJ_ton, { showlegend: true }), marker(t, S.cullet_pct, r.CO2_total_kg_ton, { xaxis: 'x2', yaxis: 'y2' })],
+      layout: stacked(t, 'Cullet (%)', 'Energy (MJ/ton)', 'CO₂ (kg/ton)'),
+      table: () => tbl(['Cullet (%)', 'Energy (MJ/ton)', 'CO₂ (kg/ton)'], x.map((v, i) => [nf(v, 1), nf(en[i], 0), nf(co[i], 1)])) }); }
+
+  // 3 CO2 vs furnace T
+  { const T = lin(1350, 1650, 40), co = T.map((v) => run(Object.assign({}, p, { T_furnace: v })).CO2_total_kg_ton);
+    spec.push({ id: 'co2t', title: 'CO₂ vs furnace temperature', cap: 'Flat by construction: fuel input is its own slider, so furnace temperature does not enter the CO₂ sum.', h: 340,
+      data: [line(t, 'CO₂ (kg/ton)', T, co, t.blue), marker(t, S.T_furnace, r.CO2_total_kg_ton, { showlegend: true })],
+      layout: baseLayout(t, { xaxis: axis(t, 'T furnace (°C)'), yaxis: axis(t, 'CO₂ (kg/ton)', { rangemode: 'tozero' }) }),
+      table: () => tbl(['T furnace (°C)', 'CO₂ (kg/ton)'], T.map((v, i) => [nf(v, 0), nf(co[i], 1)])) }); }
+
+  // 4 bubble removal
+  { const res = r.residence_time_h, tt = lin(0, res, 200), N = tt.map((v) => m.pool.bubbleRemoval(v));
+    spec.push({ id: 'bubble', title: 'Bubble removal kinetics', cap: 'Relative bubble count over the melt residence time.', h: 340,
+      data: [line(t, 'Bubble count (relative)', tt, N, t.violet, { fill: 'tozeroy', fillcolor: rgba(t.violet, 0.10) })],
+      layout: baseLayout(t, { xaxis: axis(t, 'Residence time (h)'), yaxis: axis(t, 'Relative bubble count', { rangemode: 'tozero' }), showlegend: false, margin: { l: 62, r: 14, t: 10, b: 46 } }),
+      table: () => tbl(['Time (h)', 'Bubble count'], tt.filter((_, i) => i % 20 === 0 || i === 199).map((v, i) => [nf(v, 2), nf(m.pool.bubbleRemoval(v), 2)])) }); }
+
+  // 5 exergy
+  { const ex = r.exergy_summary, F = ex['Fuel Exergy (MJ/ton)'], D = ex['Exergy Destruction (MJ/ton)'], P = ex['Product Exergy (MJ/ton)'];
+    const labs = ['Fuel exergy (input)', 'Exergy destruction', 'Product exergy'], vals = [F, D, P];
+    spec.push({ id: 'exergy', title: 'Exergy flow', cap: 'Input exergy, then what is destroyed and what leaves with the glass, MJ/ton.', h: 340,
+      data: [{ type: 'bar', x: labs, y: vals, base: [0, F - D, F - D - P], width: 0.5, marker: { color: [t.blue, t.orange, t.teal] },
+        text: vals.map((v) => nf(v, 0)), textposition: 'outside', cliponaxis: false, textfont: { color: t.fg, family: t.mono, size: 11 }, hoverinfo: 'skip' }],
+      layout: baseLayout(t, { showlegend: false, hovermode: 'closest', xaxis: axis(t, '', { ticks: '' }), yaxis: axis(t, 'MJ/ton'), margin: { l: 62, r: 14, t: 24, b: 46 } }),
+      table: () => tbl(['Item', 'MJ/ton'], labs.map((l, i) => [l, nf(vals[i], 1)])) }); }
+
+  // 6 flame T vs O2
+  { const O2 = lin(0.21, 1.0, 60), fl = O2.map((o) => new Combustion(p.fuel_type, o, 0.1).adiabaticFlameT() - 273.15);
+    spec.push({ id: 'flame', title: 'Adiabatic flame temperature vs O₂ enrichment', cap: 'For the selected fuel type.', h: 340,
+      data: [line(t, 'T flame (°C)', O2.map((o) => o * 100), fl, t.orange), marker(t, S.O2_pct, r.T_flame_C, { showlegend: true })],
+      layout: baseLayout(t, { xaxis: axis(t, 'O₂ concentration (%)'), yaxis: axis(t, 'T flame (°C)') }),
+      table: () => tbl(['O₂ (%)', 'T flame (°C)'], O2.filter((_, i) => i % 3 === 0).map((o, i) => [nf(o * 100, 1), nf(fl[i * 3], 0)])) }); }
+
+  // 7 fuel vs electric trade-off
+  { const E = lin(0, 50, 30), co = [], cost = [];
+    E.forEach((e) => { const q = run(Object.assign({}, p, { electric_boost: e })); co.push(q.CO2_total_kg_ton); cost.push(q.production_cost_EUR_ton); });
+    spec.push({ id: 'tradeoff', title: 'Fuel vs electric boost trade-off', cap: 'Two panels, one shared x axis.', h: 420,
+      data: [line(t, 'CO₂ (kg/ton)', E, co, t.blue), line(t, 'Cost (€/ton)', E, cost, t.teal, { xaxis: 'x2', yaxis: 'y2' }),
+        marker(t, S.electric_boost, r.CO2_total_kg_ton, { showlegend: true }), marker(t, S.electric_boost, r.production_cost_EUR_ton, { xaxis: 'x2', yaxis: 'y2' })],
+      layout: stacked(t, 'Electric boost (%)', 'CO₂ (kg/ton)', 'Cost (€/ton)'),
+      table: () => tbl(['Boost (%)', 'CO₂ (kg/ton)', 'Cost (€/ton)'], E.map((v, i) => [nf(v, 1), nf(co[i], 1), nf(cost[i], 1)])) }); }
+
+  // 8 SiO2 sweep
+  { const Sx = lin(68, 78, 40), tg = [], tl = [], vs = [];
+    Sx.forEach((s) => {
+      const q = Object.assign({}, p, { SiO2: s, Na2O: Math.max(10.0, p.Na2O - (s - p.SiO2) * 0.5) });
+      let tot = 0; OXIDES.forEach((k) => { tot += q[k] ?? 0; });
+      const c = {}; OXIDES.forEach((k) => { c[k] = (q[k] ?? 0) / tot * 100; });
+      const g = new Glass(c); tg.push(g.Tg()); tl.push(g.Tliquidus()); vs.push(Math.log10(g.viscosity(1400.0) + 1e-6));
+    });
+    spec.push({ id: 'sio2', title: 'SiO₂ effect on glass properties', cap: 'Na₂O is traded against SiO₂ to keep the total near 100%.', h: 420,
+      data: [line(t, 'Tg (°C)', Sx, tg, t.violet), line(t, 'T liquidus (°C)', Sx, tl, t.orange), line(t, 'log₁₀ η at 1400 °C', Sx, vs, t.blue, { xaxis: 'x2', yaxis: 'y2' }),
+        marker(t, S.SiO2, r.Tg_C, { showlegend: true })],
+      layout: stacked(t, 'SiO₂ (%)', 'Temperature (°C)', 'log₁₀ η (Pa·s)'),
+      table: () => tbl(['SiO₂ (%)', 'Tg (°C)', 'T liquidus (°C)', 'log₁₀ η at 1400'], Sx.map((v, i) => [nf(v, 2), nf(tg[i], 0), nf(tl[i], 0), nf(vs[i], 2)])) }); }
+
+  // 9 Sankey
+  { const b = r.energy_breakdown, keys = Object.keys(b);
+    const labels = ['Fuel input'].concat(keys.map((k) => `${k} (${sg(b[k], 0)})`));
+    const nodeC = [t.blue, t.teal, t.teal, t.teal, t.orange, t.orange, t.violet], linkC = nodeC.slice(1).map((c) => rgba(c, 0.35));
+    spec.push({ id: 'sankey', title: 'Energy flow', cap: 'Each band is one term of the energy balance, MJ/ton (absolute value).', h: 380, wide: true,
+      data: [{ type: 'sankey', orientation: 'h', node: { pad: 18, thickness: 16, line: { color: t.line, width: 0.5 }, label: labels, color: nodeC },
+        link: { source: keys.map(() => 0), target: keys.map((_, i) => i + 1), value: keys.map((k) => Math.abs(b[k])), color: linkC } }],
+      layout: baseLayout(t, { showlegend: false, hovermode: 'closest', margin: { l: 10, r: 10, t: 10, b: 10 }, font: { family: t.mono, color: t.fg, size: 12 } }),
+      table: () => tbl(['Term', 'MJ/ton'], keys.map((k) => [k, sg(b[k], 1)])) }); }
+  return spec;
+}
+
+let chartsBuilt = false;
+function buildChartShells() {
+  const host = $('#panel-charts');
+  if (!window.Plotly) { host.innerHTML = '<p class="notice">The charts need the Plotly library from cdn.jsdelivr.net, which did not load. Check the connection and reload the page. The KPIs and the optimizer still work.</p>'; return false; }
+  const ids = [['visc', 0], ['cullet', 0], ['co2t', 0], ['bubble', 0], ['exergy', 0], ['flame', 0], ['tradeoff', 0], ['sio2', 0], ['sankey', 1]];
+  host.innerHTML = '<div class="charts">' + ids.map(([id, w]) => `<article class="chart${w ? ' wide' : ''}" id="ch-${id}"><h3></h3><p></p><div class="plot"></div><details><summary>Data table</summary><div class="tb"></div></details></article>`).join('') + '</div>';
+  host.querySelectorAll('details').forEach((d) => d.addEventListener('toggle', () => { if (d.open && lastSpecs) { const s = lastSpecs.find((x) => 'ch-' + x.id === d.closest('article').id); d.querySelector('.tb').innerHTML = s.table(); } }));
+  return true;
+}
+let lastSpecs = null;
+function renderCharts(r) {
+  if (!chartsBuilt) chartsBuilt = buildChartShells();
+  if (!chartsBuilt) return;
+  const specs = lastSpecs = chartSpecs(r), cfg = { responsive: true, displayModeBar: false };
+  specs.forEach((s) => {
+    const el = $('#ch-' + s.id); el.querySelector('h3').textContent = s.title; el.querySelector('p').textContent = s.cap;
+    const plot = el.querySelector('.plot'); plot.style.height = s.h + 'px';
+    Plotly.react(plot, s.data, Object.assign({ height: s.h, autosize: true }, s.layout), cfg);
+    const d = el.querySelector('details'); if (d.open) d.querySelector('.tb').innerHTML = s.table();
+  });
+}
+
+/* ---- ML optimizer tab ---- */
+const OBJ = { co2: { label: 'Minimum CO₂', sign: 1, idx: 0, unit: 'kg/ton', d: 1, name: 'CO₂' },
+  energy: { label: 'Minimum energy', sign: 1, idx: 1, unit: 'MJ/ton', d: 0, name: 'Energy demand' },
+  durability: { label: 'Maximum durability', sign: -1, idx: 2, unit: '/ 10', d: 2, name: 'Durability' } };
+
+function optimizerShell() {
+  $('#panel-optimizer').innerHTML = `
+    <p class="ml-intro">Physics runs are cheap for one set of inputs, but a search needs thousands. This tab trains three gradient boosting models on 400 random simulations, checks them on 150 unseen ones, and then searches the operating window on the models. Every proposal is re-checked with the full physics model.</p>
+    <div id="ml-fit"><p class="notice">Training the surrogate on 400 simulations…</p></div>
+    <div class="ml-bar" id="ml-bar">
+      <button class="btn primary" type="button" data-obj="co2" disabled>Minimum CO₂</button>
+      <button class="btn primary" type="button" data-obj="energy" disabled>Minimum energy</button>
+      <button class="btn primary" type="button" data-obj="durability" disabled>Maximum durability</button>
+    </div>
+    <div id="ml-result"><p class="notice">Pick an objective. The search starts from your current slider settings and stays inside the training ranges.</p></div>`;
+  $('#ml-bar').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => runOptimize(b.dataset.obj)));
+}
+function renderParity() {
+  if (!sur || !window.Plotly) return;
+  const t = theme(), cfg = { responsive: true, displayModeBar: false };
+  [['co2', 'CO₂ (kg/ton)'], ['energy', 'Energy (MJ/ton)'], ['durability', 'Durability index']].forEach(([k, title]) => {
+    const el = $('#parity-' + k); if (!el) return; const f = sur.fit[k], lo = Math.min(...f.true, ...f.pred), hi = Math.max(...f.true, ...f.pred);
+    Plotly.react(el, [
+      { type: 'scatter', mode: 'lines', x: [lo, hi], y: [lo, hi], line: { color: t.fg3, width: 1, dash: 'dot' }, hoverinfo: 'skip', name: 'Perfect agreement' },
+      { type: 'scatter', mode: 'markers', x: f.true, y: f.pred, name: 'Held-out run', marker: { size: 8, color: rgba(t.blue, 0.8), line: { color: t.surface, width: 1 } },
+        hovertemplate: 'Physics %{x:,.1f}<br>Surrogate %{y:,.1f}<extra></extra>' }
+    ], baseLayout(t, { hovermode: 'closest', margin: { l: 66, r: 10, t: 26, b: 50 }, height: 260, autosize: true,
+      xaxis: axis(t, 'Physics model'), yaxis: axis(t, 'Surrogate prediction') }), cfg);
+  });
+}
+function renderFit() {
+  const f = sur.fit;
+  $('#ml-fit').innerHTML = `<div class="fit-grid">${[['co2', 'CO₂'], ['energy', 'Energy demand'], ['durability', 'Durability']].map(([k, n]) =>
+    `<div class="chart"><h3>${n}</h3><p>R² on ${sur.nTest} unseen runs: <b>${nf(f[k].r2, 3)}</b></p><div class="plot" id="parity-${k}" style="height:260px"></div></div>`).join('')}</div>`;
+  renderParity();
+  $('#ml-bar').querySelectorAll('button').forEach((b) => { b.disabled = false; });
+}
+function ensureTrained() {
+  if (sur) return;
+  setTimeout(() => { sur = trainSurrogate(); if (activeTab === 'optimizer') renderFit(); }, 30);
+}
+function currentVector() { const p = toParams(); return OPT_FIELDS.map((f) => clip(p[f.k], f.lo, f.hi)); }
+function renderOptimizerCurrent() { /* inputs changed while the tab is open: keep results, nothing to recompute */ }
+function runOptimize(key) {
+  const o = OBJ[key], btns = $('#ml-bar').querySelectorAll('button');
+  btns.forEach((b) => { b.disabled = true; });
+  $('#ml-result').innerHTML = `<p class="notice">Searching for ${o.label.toLowerCase()}…</p>`;
+  setTimeout(() => {
+    const x0 = currentVector(), res = searchSurrogate(sur.models[key], o.sign, x0);
+    const phys0 = surrogateObjectives(x0), phys1 = surrogateObjectives(Array.from(res.x));
+    lastOpt = { key, x0, x1: Array.from(res.x) };
+    const rowsHtml = OPT_FIELDS.map((f, i) => {
+      const sc = f.scale || 1, a = x0[i] * sc, b = res.x[i] * sc, dlt = b - a;
+      return `<tr><td>${f.label}</td><td>${nf(a, f.d)} ${f.unit}</td><td>${nf(b, f.d)} ${f.unit}</td><td class="${Math.abs(dlt) < 0.5 * Math.pow(10, -f.d) ? 'delta-0' : 'delta-up'}">${dlt >= 0 ? '+' : '−'}${nf(Math.abs(dlt), f.d)}</td></tr>`;
+    }).join('');
+    const chk = ['co2', 'energy', 'durability'].map((k) => { const q = OBJ[k]; const a = phys0[q.idx], b = phys1[q.idx];
+      return `<tr><td>${q.name}</td><td>${nf(a, q.d)} ${q.unit}</td><td>${nf(b, q.d)} ${q.unit}</td><td>${b - a >= 0 ? '+' : '−'}${nf(Math.abs(b - a), q.d)}</td></tr>`; }).join('');
+    $('#ml-result').innerHTML = `
+      <div class="callout"><b>${o.label}.</b> The surrogate predicts ${nf(res.value, o.d)} ${o.unit} at the proposed settings. The physics model gives <b>${nf(phys1[o.idx], o.d)} ${o.unit}</b>, against ${nf(phys0[o.idx], o.d)} ${o.unit} at your current settings.</div>
+      <div class="sect result"><h3>Proposed operating point</h3><div class="scroll"><table><thead><tr><th>Parameter</th><th>Current</th><th>Proposed</th><th>Change</th></tr></thead><tbody>${rowsHtml}</tbody></table></div></div>
+      <div class="sect result" style="margin-top:22px"><h3>Check with the physics model</h3><div class="scroll"><table><thead><tr><th>Output</th><th>Current</th><th>Proposed</th><th>Change</th></tr></thead><tbody>${chk}</tbody></table></div></div>
+      <div class="ml-bar"><button class="btn" type="button" id="apply">Apply to sliders</button></div>
+      <p class="fine">The search runs on the surrogate: 2,500 random starts, then a coordinate pattern search from the best ten, always inside the training ranges. The surrogate assumes CH₄ firing, container cullet and fixed minor oxides, so applying a proposal also sets those. Boosted trees are flat between training points, so a proposal near the edge of the data should be confirmed with the physics model, as above.</p>`;
+    $('#apply').addEventListener('click', applyOptimum);
+    btns.forEach((b) => { b.disabled = false; });
+  }, 40);
+}
+function applyOptimum() {
+  if (!lastOpt) return;
+  const upd = Object.assign({}, FIXED_MINOR, { fuel_type: 'CH4', cullet_type: 'Container (soda-lime)' });
+  OPT_FIELDS.forEach((f, i) => {
+    const v = lastOpt.x1[i];
+    if (f.k === 'O2_fraction') upd.O2_pct = Math.round(v * 1000) / 10; else if (f.k === 'cullet_fraction') upd.cullet_pct = Math.round(v * 1000) / 10;
+    else { const it = ITEM[f.k]; upd[f.k] = Math.round(v / it.step) * it.step; }
+  });
+  Object.assign(S, upd); syncAll(); setTab('kpis'); schedule();
+}
+
+/* ---- tabs ---- */
+function setTab(name) {
+  activeTab = name;
+  document.querySelectorAll('.tabs button').forEach((b) => { const on = b.dataset.tab === name; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; });
+  ['kpis', 'charts', 'optimizer'].forEach((n) => { $('#panel-' + n).hidden = n !== name; });
+  try { history.replaceState(null, '', '#' + name); } catch (e) { /* ignore */ }
+  if (name === 'optimizer') { if (!$('#ml-bar')) optimizerShell(); if (sur) renderFit(); else ensureTrained(); }
+  if (result) { if (name === 'kpis') renderKPIs(result); else if (name === 'charts') renderCharts(result); }
+}
+function buildTabs() {
+  const tabs = [...document.querySelectorAll('.tabs button')];
+  tabs.forEach((b, i) => {
+    b.addEventListener('click', () => setTab(b.dataset.tab));
+    b.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+      const n = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length]; n.focus(); setTab(n.dataset.tab);
+    });
+  });
+}
+
+/* ---- theme changes redraw the plots ---- */
+function onTheme() { if (activeTab === 'charts' && result) renderCharts(result); if (activeTab === 'optimizer') renderParity(); }
+try { window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', onTheme); } catch (e) { /* ignore */ }
+new MutationObserver(onTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+/* ---- boot ---- */
+buildControls(); buildPresets(); buildTabs(); syncAll();
+update();
+const hashTab = (location.hash || '').replace('#', '');
+if (['kpis', 'charts', 'optimizer'].includes(hashTab) && hashTab !== 'kpis') setTab(hashTab);
+
+window.Twin = { run, buildModels, toParams, S, DEFAULTS, GBR, fitTree, presortColumns, surrogateObjectives, trainSurrogate, searchSurrogate, mulberry32, Combustion, Glass, sampleVectors, setTab, OPT_FIELDS };
+})();
+</script>
+
+</body></html>
